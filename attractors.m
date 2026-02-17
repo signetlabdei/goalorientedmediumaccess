@@ -8,8 +8,7 @@
 %                                                                         %
 % Determines the attraction regions of LIBRA policies by iterating over   %
 % all possible initial starting policies (N=3 nodes, exponential or       %
-% Gaussian VoI distribution)
-%                                                                         %
+% Gaussian VoI distribution) over a pure collision channel                %
 % Parameters:                                                             %
 % -M:           the number of steps to simulate [scalar, int]             %
 % -epsilon:     the grid approximation error [scalar, 0-1]                %

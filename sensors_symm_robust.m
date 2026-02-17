@@ -1,13 +1,14 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %                                                                         %
-%                         script: sensors_asymm                           %
+%                       script: sensors_symm_robust                       %
 %           author: Federico Chiariotti (chiariot@dei.unipd.it)           %
 %                             license: GPLv3                              %
 %                                                                         %
 %                                                                         %
 %                                                                         %
-% Runs a Monte Carlo simulation with random asymmetric sensor networks    %
-% using chi-squared value distributions as a function of the asymmetry    %
+% Runs a Monte Carlo simulation with random asymmetric sensor network     %
+% using chi-squared value distributions and a symmetric belief (i.e., all %
+% sensors believe they have the same mean)                                %
 %                                                                         %
 % Parameters:                                                             %
 % -N:           the  number of nodes [scalar, int]                        %
@@ -17,13 +18,15 @@
 % -delta:       the VoI quantization step [scalar, R+]                    %
 % -Vmax:        the maximum possible VoI [scalar, R+]                     %
 % -psi:         the transmission attempt cost [scalar, R+]                %
-% -sigmas:      possible values for the mean VoI variation [1 x L, R+]    %
+% -nus:          the variation in the average VoI estimate [1 x L, R+]    %       
 % -max_iter:    the maximum number of IBR iterations [scalar, int]        %
 %                                                                         %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+
 close all
 clearvars
+
 
 % Simulation parameters
 N = 10;
@@ -33,44 +36,43 @@ epsilon = 1e-3;
 delta = 1e-4;
 Vmax = 50;
 psi = 0.25;
-sigmas = 0 : 0.05 : 0.8;
+sigma = 0;
+nus = 0: 0.05: 0.5;
 max_iter = 1000;
 
-% Success probability
+% Success probability calculation
 success = zeros(1, N);
 success(1) = 1;
-L = length(sigmas);
 
-% Auxiliary variables
+
+% Utilivty variables
+L = length(nus);
+values = 0 : delta : Vmax;
 pull_rewards = zeros(L, T);
-pull_vois = zeros(L, T);
-pull_energies = zeros(L, T);
-pull_fairness = zeros(L, T);
 th_rewards = zeros(L, T);
-th_energies = zeros(L, T);
-th_fairness = zeros(L, T);
-mc_rewards = zeros(L, T);
-mc_vois = zeros(L, T);
-mc_energies = zeros(L, T);
-values = 0 : delta : 50;
+syn_rewards = zeros(L, T);
+
 
 % Run LIBRA
 for ell = 1 : L
-    sigma = sigmas(ell);
+    nu = nus(ell);
     for t = 1 : T
-        sigma, t
-        % Generate random realization
-        mus = ones(1, N) + (rand(1, N) - 0.5) * 2 * sigma;
-        % Compute expected rewards and VoI CDFs for all nodes
+        nu, t
+        % Compute real and estimated CDF (individual and synchronized errors)
+        syn_mus = ones(1, N);    
+        mus = syn_mus + (rand(1, N) - 0.5) * 2 * nu;
         cdf = zeros(N, length(values) + 1);
+        syn_cdf = zeros(N, length(values) + 1);
         for n = 1 : N
             cdf(n, :) = [0, 1 - exp(-(values + delta / 2) / mus(n))];
-        end
+            syn_cdf(n, :) = [0, 1 - exp(-(values + delta / 2) / syn_mus(n))];
+        end    
+    
+    
         % Compute pull-based solution
         [~, nb] = max(mus);
         exp_values = diff(cdf(nb(1), :)) * values';
         pull_rew = 0;
-        pull_val = 0;
         pull_tx = 0;
         for v = 1 : length(values)
             if (v > 1)
@@ -81,29 +83,28 @@ for ell = 1 : L
             if (v_rew > pull_rew)
                 pull_tx = 1 - cdf(nb(1), v);
                 pull_rew = v_rew;
-                pull_val = exp_values;
             end
         end
-    
-        % Compute pull-based performance
         pull_rewards(ell, t) = pull_rew;
-        pull_vois(ell, t) = pull_val;
-        pull_energies(ell, t) = pull_tx;
-        pull_fairness(ell, t) = 1 / N;
     
-        % Determine LIBRA solution
-        [v_eq, voi_0, initial_thresholds] = equal_value_initialization(cdf, values, psi, success);
-        [thresholds, reward_iter] = iterated_best_response(cdf, psi, epsilon,success, values, initial_thresholds, max_iter);
-        reward = max(reward_iter);
-        th_rewards(ell, t) = reward;
-        th_energies(ell, t) = sum(1 - thresholds);
-        % Compute fairness
-        th_fairness(ell, t) = (sum(1 - thresholds)) ^ 2 / N / sum((1 - thresholds) .^ 2);
-
-        % Monte Carlo check
-        [mc_voi, mc_reward, energy, goodput, channel_use, ~] = montecarlo(cdf, values, psi, success, thresholds, M);
-        mc_rewards(ell, t) = mc_reward;
-        mc_vois(ell, t) = mc_voi;
-        mc_energies(ell, t) = sum(energy);
+        % Real solution with LIBRA
+        [~, ~, initial_thresholds] = equal_value_initialization(cdf, values, psi, success);
+        [~, iter_rewards] = iterated_best_response(cdf, psi, epsilon, success, values, initial_thresholds, max_iter);
+        th_rewards(ell, t) = max(iter_rewards);
+        % Noisy (synchronized) solution with LIBRA
+        [~, ~, syn_initial_thresholds] = equal_value_initialization(syn_cdf, values, psi, success);
+        [est_thresholds] = iterated_best_response(syn_cdf, psi, epsilon, success, values, syn_initial_thresholds, max_iter);
+        threshold_indices = ones(1, N) * 1e9;
+        syn_thresholds = ones(1, N);
+        for m = 1 : N
+            threshold_index = find(cdf(m, :) >= est_thresholds(m), 1);
+            if (~isempty(threshold_index))
+                threshold_indices(m) = threshold_index;
+                syn_thresholds(m) = cdf(m, threshold_index);
+            end
+        end
+        [~, mc_reward, ~, ~, ~, ~] = montecarlo(cdf, values, psi, success, syn_thresholds, M);
+        syn_rewards(ell, t) = mc_reward;
     end
+
 end

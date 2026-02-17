@@ -38,9 +38,14 @@ epsilon = 1e-3;
 delta = 1e-4;
 Vmax = 50;
 psi = 0.25;
-sigma = 0.25;
+sigma = 0;
 nu = 0.25;
 max_iter = 1000;
+
+% Success probability calculation
+success = zeros(1, N);
+success(1) = 1;
+
 
 % Utilivty variables
 values = 0 : delta : Vmax;
@@ -90,12 +95,12 @@ for t = 1 : T
     pull_rewards(t) = pull_rew;
 
     % Real solution with LIBRA
-    [~, ~, initial_thresholds] = equal_value_initialization(syn_cdf, values, psi);
-    [~, iter_rewards] = iterated_best_response(cdf, psi, epsilon, values, initial_thresholds, max_iter);
+    [~, ~, initial_thresholds] = equal_value_initialization(syn_cdf, values, psi, success);
+    [~, iter_rewards] = iterated_best_response(cdf, psi, epsilon, success, values, initial_thresholds, max_iter);
     th_rewards(t) = max(iter_rewards);
     % Noisy (synchronized) solution with LIBRA
-    [~, ~, syn_initial_thresholds] = equal_value_initialization(syn_cdf, values, psi);
-    [est_thresholds] = iterated_best_response(syn_cdf, psi, epsilon, values, syn_initial_thresholds, max_iter);
+    [~, ~, syn_initial_thresholds] = equal_value_initialization(syn_cdf, values, psi, success);
+    [est_thresholds] = iterated_best_response(syn_cdf, psi, epsilon, success, values, syn_initial_thresholds, max_iter);
     threshold_indices = ones(1, N) * 1e9;
     syn_thresholds = ones(1, N);
     for m = 1 : N
@@ -105,20 +110,20 @@ for t = 1 : T
             syn_thresholds(m) = cdf(m, threshold_index);
         end
     end
-    [~, mc_reward, ~, ~, ~, ~] = montecarlo(cdf, values, psi, syn_thresholds, M);
+    [~, mc_reward, ~, ~, ~, ~] = montecarlo(cdf, values, psi, success, syn_thresholds, M);
     syn_rewards(t) = mc_reward;
 
     % Noisy (individual) solution with LIBRA
     ind_thresholds = ones(1, N);
     for m = 1 : N
-        [~, ~, ind_initial_thresholds] = equal_value_initialization(squeeze(ind_cdf(m, :, :)), values, psi);
-        [est_thresholds] = iterated_best_response(squeeze(ind_cdf(m, :, :)), psi, epsilon, values, syn_initial_thresholds, max_iter);
+        [~, ~, ind_initial_thresholds] = equal_value_initialization(squeeze(ind_cdf(m, :, :)), values, psi, success);
+        [est_thresholds] = iterated_best_response(squeeze(ind_cdf(m, :, :)), psi, epsilon, success, values, syn_initial_thresholds, max_iter);
         threshold_index = find(cdf(m, :) >= est_thresholds(m), 1);
         if (~isempty(threshold_index))
             ind_thresholds(m) = cdf(m, threshold_index);
         end
     end
-    [~, mc_reward, ~, ~, ~, ~] = montecarlo(cdf, values, psi, ind_thresholds, M);
+    [~, mc_reward, ~, ~, ~, ~] = montecarlo(cdf, values, psi, success, ind_thresholds, M);
     ind_rewards(t) = mc_reward;
 
 end
